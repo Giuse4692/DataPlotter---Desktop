@@ -3,7 +3,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
 
-# Import export_utils (assumo che contenga la show_download_ui)
+# Assicurati che il tuo file export_utils sia nella cartella modules/
 import modules.export_utils as export_utils 
 
 def show_plotting_ui(df):
@@ -12,19 +12,25 @@ def show_plotting_ui(df):
     
     column_list = df.columns.tolist()
     
-    # --- 2. Mappatura Assi (MODIFICATA) ---
+    # --- 1. Selezione Tipo di Grafico ---
+    plot_type = st.selectbox(
+        "Scegli il tipo di grafico",
+        ["Linea 2D", "Scatter 2D", "Scatter 3D", "Linea 3D (Line)", "Superficie 3D (Mesh)"]
+    )
+    
+    # --- 2. Mappatura Assi ---
     st.sidebar.header("2. Mappatura Assi")
     x_axis = st.sidebar.selectbox("Asse X", column_list, index=0, key="x_axis")
     
-    # ⚠️ MULTISELECT per le curve 2D
+    # MULTISELECT per le curve 2D
     y_axes = st.sidebar.multiselect(
-        "Assi Y (Curve 2D) / Asse Y (Curve 3D)", # Etichetta aggiornata
+        "Assi Y (Curve 2D) / Asse Y (Curve 3D)",
         column_list,
         default=[column_list[1]] if len(column_list) > 1 else [column_list[0]],
         key="y_axes"
     )
     
-    # Prende la prima Y per i grafici 3D, per mantenere la retrocompatibilità
+    # Prende la prima Y per i grafici 3D e per il titolo di default
     y_axis_single = y_axes[0] if y_axes else column_list[1] if len(column_list) > 1 else column_list[0]
     
     z_axis = None
@@ -33,8 +39,9 @@ def show_plotting_ui(df):
         
     color_axis = st.sidebar.selectbox("Mappa Colore (opzionale)", [None] + column_list, key="color_axis")
     
-    # --- 3. Personalizzazione (INVARIATA) ---
+    # --- 3. Personalizzazione ---
     st.sidebar.header("3. Personalizzazione")
+    
     # Aggiorna il titolo se ci sono curve multiple
     default_title = f"{', '.join(y_axes)} vs {x_axis}" if len(y_axes) > 1 and "3D" not in plot_type else f"{y_axis_single} vs {x_axis}"
     
@@ -46,8 +53,8 @@ def show_plotting_ui(df):
         z_label = st.sidebar.text_input("Etichetta Asse Z", z_axis)
     show_legend = st.sidebar.checkbox("Mostra Legenda", True)
 
-    # --- 4. Generazione Grafico (LOGICA MODIFICATA) ---
-    fig = go.Figure() # Iniziamo con un oggetto Figure vuoto, ideale per tracce multiple
+    # --- 4. Generazione Grafico ---
+    fig = go.Figure()
 
     try:
         # ----------------------------------------------------
@@ -55,11 +62,8 @@ def show_plotting_ui(df):
         # ----------------------------------------------------
         if plot_type == "Linea 2D" or plot_type == "Scatter 2D":
             mode = 'lines' if plot_type == "Linea 2D" else 'markers'
-            
-            # Seleziona la sequenza di colori da usare
             color_sequence = px.colors.qualitative.Plotly 
             
-            # ⚠️ Cicla su tutti gli assi Y selezionati e aggiunge una curva
             for i, y_col in enumerate(y_axes):
                 trace_color = color_sequence[i % len(color_sequence)]
                 
@@ -72,26 +76,36 @@ def show_plotting_ui(df):
                     marker=dict(color=trace_color) if mode == 'markers' else None
                 ))
 
-            # Se si usa Mappa Colore in 2D, lo ignoriamo qui perché abbiamo disegnato tracce separate.
-            
         # ----------------------------------------------------
         # LOGICA 3D: TRACCE SINGOLE (Linee e Scatter)
         # ----------------------------------------------------
         elif plot_type == "Scatter 3D":
-            fig = px.scatter_3d(df, x=x_axis, y=y_axis_single, z=z_axis, 
-                                color=color_axis, title=plot_title, 
-                                color_continuous_scale='Viridis' if color_axis else None)
+            is_numeric = color_axis and df[color_axis].dtype.kind in 'iufc'
+            
+            fig = px.scatter_3d(
+                df, 
+                x=x_axis, y=y_axis_single, z=z_axis, color=color_axis, 
+                title=plot_title,
+                color_continuous_scale='Viridis' if is_numeric else None,
+                color_discrete_sequence=px.colors.qualitative.Plotly if color_axis and not is_numeric else None
+            )
+            
         elif plot_type == "Linea 3D (Line)":
-            fig = px.line_3d(df, x=x_axis, y=y_axis_single, z=z_axis, 
-                             color=color_axis, title=plot_title, 
-                             color_continuous_scale='Viridis' if color_axis else None)
+            # px.line_3d non supporta color_continuous_scale. Usiamo solo discreto per evitare errori.
+            fig = px.line_3d(
+                df, 
+                x=x_axis, y=y_axis_single, z=z_axis, color=color_axis, 
+                title=plot_title,
+                color_discrete_sequence=px.colors.qualitative.Plotly if color_axis else None
+            )
 
         # ----------------------------------------------------
-        # LOGICA Mesh 3D (Invariata)
+        # LOGICA Mesh 3D (Funzionante)
         # ----------------------------------------------------
         elif plot_type == "Superficie 3D (Mesh)":
             intensity_data = df[z_axis]
             colorscale_choice = 'Blues'
+            
             if color_axis:
                  intensity_data = df[color_axis]
                  colorscale_choice = 'Viridis' 
@@ -110,8 +124,15 @@ def show_plotting_ui(df):
             fig.update_layout(
                 title=plot_title,
                 showlegend=show_legend,
-                colorway=px.colors.qualitative.Plotly # Forza colorway per Plotly Express
+                colorway=px.colors.qualitative.Plotly
             )
+            
+            # --- Configurazione Colore per Kaleido (Correzione) ---
+            if color_axis and "Mesh" not in plot_type: # Mesh 3D ha la sua configurazione colore
+                fig.update_layout(coloraxis=dict(
+                    colorscale=px.colors.sequential.Viridis,
+                    colorbar=dict(title=color_axis)
+                ))
             
             # --- Configurazione Assi ---
             if "3D" in plot_type:
@@ -130,7 +151,7 @@ def show_plotting_ui(df):
             config = {'displaylogo': False, 'modeBarButtonsToRemove': ['toImage']}
             st.plotly_chart(fig, use_container_width=True, config=config)
 
-            # --- CHIAMATA CORRETTA AL MODULO DOWNLOAD ---
+            # --- CHIAMATA AL MODULO DOWNLOAD (Funziona con Kaleido) ---
             export_utils.show_download_ui(fig, plot_title)
 
     except IndexError:

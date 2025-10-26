@@ -1,0 +1,13 @@
+# Cartelle di output di PyInstaller
+build/
+dist/
+*.spec
+
+# File Python compilati e cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Database locale o file di log
+*.log
+*.sqlite
