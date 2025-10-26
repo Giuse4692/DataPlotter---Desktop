@@ -3,7 +3,6 @@ import os
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
 # Directory di lavoro (cartella del progetto)
-# Usiamo il percorso assoluto per aiutare PyInstaller
 pathex = [os.path.abspath('.')]
 
 # ---- Raccogli dati e metadati ----
@@ -14,26 +13,34 @@ datas += [('app.py', '.')]
 datas += [('modules', 'modules')]
 
 # Lista di pacchetti che spesso richiedono metadati espliciti per la corretta esecuzione
-for pkg in ('streamlit', 'plotly', 'pandas', 'kaleido', 'altair', 'importlib_metadata'):
+for pkg in ('streamlit', 'plotly', 'pandas', 'kaleido', 'altair', 'importlib_metadata', 'toml'):
     try:
-        # Aggiunge i data files (assets, templates, ecc.)
         datas += collect_data_files(pkg)
     except Exception:
         pass
     try:
-        # Aggiunge i metadati (*.dist-info) - ESSENZIALE PER RISOLVERE PackageNotFoundError
         datas += copy_metadata(pkg)
     except Exception:
         pass
 
 # ---- Hidden imports utili (per risolvere ModuleNotFoundError) ----
 hidden_imports = [
+    # importlib / pkg tools
     'importlib.metadata',
     'importlib_metadata',
     'pkg_resources',
-    # Inclusione esplicita di moduli Streamlit interni
+
+    # Streamlit - includiamo sia il vecchio che il nuovo path "web.cli"
     'streamlit',
     'streamlit.version',
+    'streamlit.cli',
+    'streamlit.web.cli',
+    'streamlit.web.bootstrap',
+    'streamlit.web.server.server',
+    'streamlit.runtime.scriptrunner',
+    'streamlit.watcher',
+    'streamlit.config',
+    # moduli usati dal tuo progetto
     'pandas',
     'plotly',
     'kaleido',
@@ -44,7 +51,7 @@ a = Analysis(
     ['run_desktop.py'],
     pathex=pathex,
     binaries=[],
-    datas=datas, # Usiamo la variabile 'datas' creata sopra
+    datas=datas,  # Usiamo la variabile 'datas' creata sopra
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
@@ -71,7 +78,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False, # Modo windowed/desktop
+    console=False,  # app grafica / windowed
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
