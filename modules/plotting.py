@@ -1,28 +1,130 @@
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+import numpy as np 
+import pandas as pd
+import re 
 from io import BytesIO
 
-# Assicurati che il tuo file export_utils sia nella cartella modules/
 import modules.export_utils as export_utils 
+import modules.annotation_utils as au 
+
+# La funzione calculate_and_plot_intersections è necessaria qui in plotting.py
+def calculate_and_plot_intersections(fig, df, x_axis_name, ref_type, val1, val2, show_points, show_table):
+    
+    intersection_results = []
+    
+    if not show_points and not show_table:
+        return 
+    
+    # --- Gestione Linea Verticale (X = Costante) ---
+    if ref_type == 'x_const':
+        x_target = val1
+        for trace in fig.data:
+            if trace.mode in ['lines', 'markers'] and trace.name not in ['Annotazioni', 'Intersezioni']:
+                x_data = np.array(trace.x)
+                y_data = np.array(trace.y)
+                
+                if x_target >= x_data.min() and x_target <= x_data.max():
+                    y_intersec = np.interp(x_target, x_data, y_data)
+                    
+                    intersection_results.append({
+                        'Curva': trace.name,
+                        'X Intersezione': x_target,
+                        'Y Intersezione': y_intersec,
+                        'Equazione': f"X = {x_target}"
+                    })
+    
+    # --- Gestione Linea Orizzontale (Y = Costante) e Lineare (Y = mX + q) ---
+    elif ref_type in ['y_const', 'linear']:
+        
+        for trace in fig.data:
+            if trace.mode in ['lines', 'markers'] and trace.name not in ['Annotazioni', 'Intersezioni']:
+                
+                x_data = np.array(trace.x)
+                y_data = np.array(trace.y)
+                
+                if ref_type == 'y_const':
+                    target_y = val1
+                    f_x = y_data - target_y 
+                else: # 'linear'
+                    m, q = val1, val2
+                    f_x = y_data - (m * x_data + q)
+                
+                f_x_signs = np.sign(f_x)
+                sign_change = np.diff(f_x_signs)
+                intersection_indices = np.where(sign_change != 0)[0]
+                
+                for i in intersection_indices:
+                    x1, x2 = x_data[i], x_data[i+1]
+                    f1, f2 = f_x[i], f_x[i+1]
+                    
+                    x_intersec = x1 - f1 * (x2 - x1) / (f2 - f1)
+                    y_intersec = np.interp(x_intersec, x_data, y_data) 
+                    
+                    is_new = True
+                    for res in intersection_results:
+                        if res['Curva'] == trace.name and abs(res['X Intersezione'] - x_intersec) < 1e-6:
+                            is_new = False
+                            break
+                    
+                    if is_new:
+                        equation_str = f"Y = {val1}X + {val2}" if ref_type == 'linear' else f"Y = {val1}"
+                        intersection_results.append({
+                            'Curva': trace.name,
+                            'X Intersezione': x_intersec,
+                            'Y Intersezione': y_intersec,
+                            'Equazione': equation_str
+                        })
+
+    if intersection_results:
+        points_df = pd.DataFrame(intersection_results)
+        
+        if show_points:
+            fig.add_trace(go.Scatter(
+                x=points_df['X Intersezione'],
+                y=points_df['Y Intersezione'],
+                mode='markers',
+                name='Intersezioni',
+                marker=dict(size=12, color='green', symbol='circle-open', line=dict(width=2))
+            ))
+
+        if show_table:
+            st.subheader("Tabella Analitica Intersezione")
+            st.dataframe(points_df.style.format({'X Intersezione': '{:.4f}', 'Y Intersezione': '{:.4f}'}), use_container_width=True)
+            
+    return intersection_results
+
 
 def show_plotting_ui(df):
+    
     st.header("Costruttore di Grafici")
     st.info("Usa la **Sidebar a sinistra** per mappare gli assi e personalizzare il grafico.")
     
     column_list = df.columns.tolist()
     
-    # --- 1. Selezione Tipo di Grafico ---
+    # 1. Selezione Tipo di Grafico (Salviamo il tipo per il reset)
     plot_type = st.selectbox(
         "Scegli il tipo di grafico",
         ["Linea 2D", "Scatter 2D", "Scatter 3D", "Linea 3D (Line)", "Superficie 3D (Mesh)"]
     )
+    st.session_state.plot_type = plot_type 
     
-    # --- 2. Mappatura Assi ---
+    # ⚠️ CORREZIONE: Definiamo 'is_3d' immediatamente dopo 'plot_type'
+    is_3d = "3D" in plot_type or "Mesh" in plot_type
+    
+    # Raccoglie le impostazioni di annotazione dalla sidebar
+    annotation_settings = au.show_annotation_controls(is_3d_mode=is_3d) # Passiamo il nuovo is_3d
+    custom_points = annotation_settings['custom_points']
+    ref_equation = annotation_settings['ref_equation']
+    show_points = annotation_settings['show_points']
+    show_table = annotation_settings['show_table']
+    
+    
+    # 2. Mappatura Assi
     st.sidebar.header("2. Mappatura Assi")
     x_axis = st.sidebar.selectbox("Asse X", column_list, index=0, key="x_axis")
     
-    # MULTISELECT per le curve 2D
     y_axes = st.sidebar.multiselect(
         "Assi Y (Curve 2D) / Asse Y (Curve 3D)",
         column_list,
@@ -30,41 +132,34 @@ def show_plotting_ui(df):
         key="y_axes"
     )
     
-    # Prende la prima Y per i grafici 3D e per il titolo di default
     y_axis_single = y_axes[0] if y_axes else column_list[1] if len(column_list) > 1 else column_list[0]
     
     z_axis = None
-    if "3D" in plot_type:
+    
+    if is_3d: # ⚠️ Ora 'is_3d' è definito e questo blocco funziona
         z_axis = st.sidebar.selectbox("Asse Z", column_list, index=2 if len(column_list) > 2 else 0, key="z_axis")
         
     color_axis = st.sidebar.selectbox("Mappa Colore (opzionale)", [None] + column_list, key="color_axis")
     
-    # ----------------------------------------------------
-    # NUOVA SEZIONE: SCALE LOGARITMICHE (3. Scale Assi)
-    # ----------------------------------------------------
     st.sidebar.header("3. Scale Assi")
     log_x = st.sidebar.checkbox("Scala Logaritmica Asse X", key="log_x")
     log_y = st.sidebar.checkbox("Scala Logaritmica Asse Y", key="log_y")
     
-    # --- 4. Personalizzazione (Titoli) ---
     st.sidebar.header("4. Titoli e Legenda")
     
-    default_title = f"{', '.join(y_axes)} vs {x_axis}" if len(y_axes) > 1 and "3D" not in plot_type else f"{y_axis_single} vs {x_axis}"
+    default_title = f"{', '.join(y_axes)} vs {x_axis}" if len(y_axes) > 1 and not is_3d else f"{y_axis_single} vs {x_axis}"
     
     plot_title = st.sidebar.text_input("Titolo Grafico", default_title)
     x_label = st.sidebar.text_input("Etichetta Asse X", x_axis)
-    y_label = st.sidebar.text_input("Etichetta Asse Y", ", ".join(y_axes) if len(y_axes) > 1 else y_axis_single)
+    y_label = st.sidebar.text_input("Etichetta Asse Y", ", ".join(y_axes) if len(y_axes) > 1 and not is_3d else y_axis_single)
     z_label = "Z"
     if z_axis:
         z_label = st.sidebar.text_input("Etichetta Asse Z", z_axis)
     show_legend = st.sidebar.checkbox("Mostra Legenda", True)
 
-    # ----------------------------------------------------
-    # SEZIONE 5: IMPOSTAZIONI CURVE DINAMICHE
-    # ----------------------------------------------------
     curve_settings = {}
     if plot_type in ["Linea 2D", "Scatter 2D"] and y_axes:
-        st.sidebar.header("5. Dettagli Curva")
+        st.sidebar.header("6. Dettagli Curva")
         st.sidebar.info("Colore e Spessore/Dimensione per ogni curva.")
         
         for i, y_col in enumerate(y_axes):
@@ -73,8 +168,7 @@ def show_plotting_ui(df):
                 default_color = px.colors.qualitative.Plotly[i % len(px.colors.qualitative.Plotly)]
                 color = st.color_picker("Colore", default_color, key=f"color_{y_col}")
                 
-                # Spessore/Dimensione del punto
-                default_width = 2.0 # ⚠️ CORREZIONE: DEVE ESSERE FLOAT
+                default_width = 2.0
                 line_width = st.slider(
                     "Spessore linea / Dimensione punto", 
                     min_value=0.5, 
@@ -88,16 +182,15 @@ def show_plotting_ui(df):
                     'color': color,
                     'width': line_width
                 }
-    # ----------------------------------------------------
     
-    # --- 6. Generazione Grafico ---
-    fig = go.Figure()
+    fig = None 
 
     try:
         # ----------------------------------------------------
-        # LOGICA 2D: TRACCE MULTIPLE (Linee e Scatter)
+        # LOGICA 2D: TRACCE MULTIPLE
         # ----------------------------------------------------
-        if plot_type == "Linea 2D" or plot_type == "Scatter 2D":
+        if plot_type in ["Linea 2D", "Scatter 2D"]:
+            fig = go.Figure() 
             mode = 'lines' if plot_type == "Linea 2D" else 'markers'
             
             for y_col in y_axes:
@@ -113,26 +206,69 @@ def show_plotting_ui(df):
                     line=dict(color=color, width=width) if mode == 'lines' else None,
                     marker=dict(color=color, size=width) if mode == 'markers' else None
                 ))
-
-        # ----------------------------------------------------
-        # LOGICA 3D: TRACCE SINGOLE (Linee e Scatter) - INVARIANTI
-        # ----------------------------------------------------
-        elif plot_type == "Scatter 3D":
-            is_numeric = color_axis and df[color_axis].dtype.kind in 'iufc'
-            fig = px.scatter_3d(
-                df, x=x_axis, y=y_axis_single, z=z_axis, color=color_axis, title=plot_title,
-                color_continuous_scale='Viridis' if is_numeric else None,
-                color_discrete_sequence=px.colors.qualitative.Plotly if color_axis and not is_numeric else None
-            )
             
-        elif plot_type == "Linea 3D (Line)":
-            fig = px.line_3d(
-                df, x=x_axis, y=y_axis_single, z=z_axis, color=color_axis, title=plot_title,
-                color_discrete_sequence=px.colors.qualitative.Plotly if color_axis else None
-            )
+            # Aggiunta traccia PUNTI DI ANNOTAZIONE 2D
+            annotation_trace = au.get_annotations_trace(custom_points, is_3d=False) 
+            if annotation_trace:
+                fig.add_trace(annotation_trace)
+            
+            # GESTIONE LINEA DI RIFERIMENTO E INTERSEZIONI
+            ref_type, val1, val2, _ = au.parse_equation_advanced(ref_equation)
+            
+            if ref_type and val1 is not None:
+                if ref_type in ['y_const', 'x_const']:
+                    au.add_reference_line(fig, ref_type.split('_')[0], val1, df=df) 
+                elif ref_type == 'linear':
+                    au.add_reference_line(fig, 'linear', val2, slope=val1, df=df) 
+                
+                calculate_and_plot_intersections(fig, df, x_axis, ref_type, val1, val2, show_points, show_table)
+
 
         # ----------------------------------------------------
-        # LOGICA Mesh 3D (Funzionante) - INVARIANTE
+        # LOGICA 3D: TRACCE MULTIPLE (Scatter e Linea)
+        # ----------------------------------------------------
+        elif plot_type in ["Scatter 3D", "Linea 3D (Line)"]:
+            
+            go_trace_type = go.Scatter3d
+            mode = 'markers' if plot_type == "Scatter 3D" else 'lines'
+
+            is_numeric = color_axis and df[color_axis].dtype.kind in 'iufc'
+            
+            if not color_axis or len(y_axes) > 1:
+                 fig = px.scatter_3d(
+                    df, x=x_axis, y=y_axis_single, z=z_axis, color=color_axis, title=plot_title,
+                    color_continuous_scale='Viridis' if is_numeric else None,
+                    color_discrete_sequence=px.colors.qualitative.Plotly
+                )
+            else:
+                 fig = go.Figure(data=[go_trace_type(
+                    x=df[x_axis], y=df[y_axis_single], z=df[z_axis],
+                    mode=mode, name=y_axis_single,
+                    marker=dict(
+                        color=df[color_axis], 
+                        colorscale='Viridis' if is_numeric else px.colors.qualitative.Plotly,
+                        cmin=df[color_axis].min(), cmax=df[color_axis].max()
+                    )
+                )])
+
+            # AGGIUNTA PUNTI DI ANNOTAZIONE 3D
+            default_z_val = df[z_axis].iloc[0] if not df.empty and z_axis in df.columns else 0.0
+            annotation_trace = au.get_annotations_trace(custom_points, is_3d=True)
+            
+            if annotation_trace:
+                fig.add_trace(go_trace_type(
+                    x=annotation_trace.x,
+                    y=annotation_trace.y,
+                    z=[default_z_val] * len(annotation_trace.x), 
+                    mode='markers+text',
+                    text=annotation_trace.text,
+                    name=annotation_trace.name,
+                    marker=dict(size=12, color='red', symbol=annotation_trace.marker.symbol)
+                ))
+
+
+        # ----------------------------------------------------
+        # LOGICA Mesh 3D (Superficie)
         # ----------------------------------------------------
         elif plot_type == "Superficie 3D (Mesh)":
             intensity_data = df[z_axis]
@@ -151,7 +287,7 @@ def show_plotting_ui(df):
                 cmin=min_intensity, cmax=max_intensity
             )])
 
-        if fig:
+        if fig: 
             # --- Layout (Generale) ---
             fig.update_layout(
                 title=plot_title,
@@ -167,14 +303,13 @@ def show_plotting_ui(df):
                 ))
             
             # --- Configurazione Assi ---
-            if "3D" in plot_type:
+            if is_3d:
                 fig.update_layout(scene=dict(
                     xaxis_title=x_label,
                     yaxis_title=y_label,
                     zaxis_title=z_label
                 ))
             else:
-                # APPLICAZIONE SCALE LOGARITMICHE E TITOLI 2D
                 x_type = "log" if log_x else "linear"
                 y_type = "log" if log_y else "linear"
                 
@@ -189,7 +324,6 @@ def show_plotting_ui(df):
             config = {'displaylogo': False, 'modeBarButtonsToRemove': ['toImage']}
             st.plotly_chart(fig, use_container_width=True, config=config)
 
-            # --- CHIAMATA AL MODULO DOWNLOAD (Funziona con Kaleido) ---
             export_utils.show_download_ui(fig, plot_title)
 
     except IndexError:
