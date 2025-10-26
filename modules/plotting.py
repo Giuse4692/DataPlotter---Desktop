@@ -39,10 +39,16 @@ def show_plotting_ui(df):
         
     color_axis = st.sidebar.selectbox("Mappa Colore (opzionale)", [None] + column_list, key="color_axis")
     
-    # --- 3. Personalizzazione ---
-    st.sidebar.header("3. Personalizzazione")
+    # ----------------------------------------------------
+    # NUOVA SEZIONE: SCALE LOGARITMICHE (3. Scale Assi)
+    # ----------------------------------------------------
+    st.sidebar.header("3. Scale Assi")
+    log_x = st.sidebar.checkbox("Scala Logaritmica Asse X", key="log_x")
+    log_y = st.sidebar.checkbox("Scala Logaritmica Asse Y", key="log_y")
     
-    # Aggiorna il titolo se ci sono curve multiple
+    # --- 4. Personalizzazione (Titoli) ---
+    st.sidebar.header("4. Titoli e Legenda")
+    
     default_title = f"{', '.join(y_axes)} vs {x_axis}" if len(y_axes) > 1 and "3D" not in plot_type else f"{y_axis_single} vs {x_axis}"
     
     plot_title = st.sidebar.text_input("Titolo Grafico", default_title)
@@ -53,7 +59,38 @@ def show_plotting_ui(df):
         z_label = st.sidebar.text_input("Etichetta Asse Z", z_axis)
     show_legend = st.sidebar.checkbox("Mostra Legenda", True)
 
-    # --- 4. Generazione Grafico ---
+    # ----------------------------------------------------
+    # SEZIONE 5: IMPOSTAZIONI CURVE DINAMICHE
+    # ----------------------------------------------------
+    curve_settings = {}
+    if plot_type in ["Linea 2D", "Scatter 2D"] and y_axes:
+        st.sidebar.header("5. Dettagli Curva")
+        st.sidebar.info("Colore e Spessore/Dimensione per ogni curva.")
+        
+        for i, y_col in enumerate(y_axes):
+            with st.sidebar.expander(f"Curva: {y_col}", expanded=(i == 0)):
+                
+                default_color = px.colors.qualitative.Plotly[i % len(px.colors.qualitative.Plotly)]
+                color = st.color_picker("Colore", default_color, key=f"color_{y_col}")
+                
+                # Spessore/Dimensione del punto
+                default_width = 2.0 # ⚠️ CORREZIONE: DEVE ESSERE FLOAT
+                line_width = st.slider(
+                    "Spessore linea / Dimensione punto", 
+                    min_value=0.5, 
+                    max_value=10.0, 
+                    value=default_width, 
+                    step=0.5, 
+                    key=f"width_{y_col}"
+                )
+                
+                curve_settings[y_col] = {
+                    'color': color,
+                    'width': line_width
+                }
+    # ----------------------------------------------------
+    
+    # --- 6. Generazione Grafico ---
     fig = go.Figure()
 
     try:
@@ -62,45 +99,40 @@ def show_plotting_ui(df):
         # ----------------------------------------------------
         if plot_type == "Linea 2D" or plot_type == "Scatter 2D":
             mode = 'lines' if plot_type == "Linea 2D" else 'markers'
-            color_sequence = px.colors.qualitative.Plotly 
             
-            for i, y_col in enumerate(y_axes):
-                trace_color = color_sequence[i % len(color_sequence)]
+            for y_col in y_axes:
+                settings = curve_settings.get(y_col, {}) 
+                color = settings.get('color', 'blue') 
+                width = settings.get('width', 2.0)
                 
                 fig.add_trace(go.Scatter(
                     x=df[x_axis],
                     y=df[y_col],
                     mode=mode,
                     name=y_col, 
-                    line=dict(color=trace_color) if mode == 'lines' else None,
-                    marker=dict(color=trace_color) if mode == 'markers' else None
+                    line=dict(color=color, width=width) if mode == 'lines' else None,
+                    marker=dict(color=color, size=width) if mode == 'markers' else None
                 ))
 
         # ----------------------------------------------------
-        # LOGICA 3D: TRACCE SINGOLE (Linee e Scatter)
+        # LOGICA 3D: TRACCE SINGOLE (Linee e Scatter) - INVARIANTI
         # ----------------------------------------------------
         elif plot_type == "Scatter 3D":
             is_numeric = color_axis and df[color_axis].dtype.kind in 'iufc'
-            
             fig = px.scatter_3d(
-                df, 
-                x=x_axis, y=y_axis_single, z=z_axis, color=color_axis, 
-                title=plot_title,
+                df, x=x_axis, y=y_axis_single, z=z_axis, color=color_axis, title=plot_title,
                 color_continuous_scale='Viridis' if is_numeric else None,
                 color_discrete_sequence=px.colors.qualitative.Plotly if color_axis and not is_numeric else None
             )
             
         elif plot_type == "Linea 3D (Line)":
-            # px.line_3d non supporta color_continuous_scale. Usiamo solo discreto per evitare errori.
             fig = px.line_3d(
-                df, 
-                x=x_axis, y=y_axis_single, z=z_axis, color=color_axis, 
-                title=plot_title,
+                df, x=x_axis, y=y_axis_single, z=z_axis, color=color_axis, title=plot_title,
                 color_discrete_sequence=px.colors.qualitative.Plotly if color_axis else None
             )
 
         # ----------------------------------------------------
-        # LOGICA Mesh 3D (Funzionante)
+        # LOGICA Mesh 3D (Funzionante) - INVARIANTE
         # ----------------------------------------------------
         elif plot_type == "Superficie 3D (Mesh)":
             intensity_data = df[z_axis]
@@ -128,7 +160,7 @@ def show_plotting_ui(df):
             )
             
             # --- Configurazione Colore per Kaleido (Correzione) ---
-            if color_axis and "Mesh" not in plot_type: # Mesh 3D ha la sua configurazione colore
+            if color_axis and "Mesh" not in plot_type:
                 fig.update_layout(coloraxis=dict(
                     colorscale=px.colors.sequential.Viridis,
                     colorbar=dict(title=color_axis)
@@ -142,9 +174,15 @@ def show_plotting_ui(df):
                     zaxis_title=z_label
                 ))
             else:
+                # APPLICAZIONE SCALE LOGARITMICHE E TITOLI 2D
+                x_type = "log" if log_x else "linear"
+                y_type = "log" if log_y else "linear"
+                
                 fig.update_layout(
                     xaxis_title=x_label,
-                    yaxis_title=y_label
+                    yaxis_title=y_label,
+                    xaxis=dict(type=x_type),
+                    yaxis=dict(type=y_type)
                 )
             
             # --- Plot e Download ---
