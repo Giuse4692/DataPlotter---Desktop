@@ -1,0 +1,5 @@
+pandas
+plotly
+kaleido
+
+streamlit_js_eval

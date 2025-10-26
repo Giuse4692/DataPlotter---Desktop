@@ -1,0 +1,70 @@
+Questo documento spiega come è strutturata l'applicazione DataPlotter.
+
+L'architettura è basata su un "Direttore d'orchestra" (app.py) e degli "Assistenti" specializzati (i file nella cartella /modules).
+
+Concetto Chiave: st.session_state
+
+Per far "parlare" i moduli tra loro, usiamo st.session_state.
+È un dizionario magico fornito da Streamlit che "sopravvive" ogni volta che l'interfaccia si aggiorna (es. quando sposti uno slider).
+
+Quando l'utente carica un file, importer.py non "passa" i dati a plotting.py. Invece:
+
+importer.py carica i dati in un DataFrame (df).
+
+Salva questo DataFrame in st.session_state.df = df.
+
+Gli altri moduli, come plotting.py e data_viewer.py, "leggono" i dati da st.session_state.df per fare il loro lavoro.
+
+Questa è la chiave per mantenere il codice modulare e funzionante.
+
+1. Il Direttore d'Orchestra: app.py
+
+Questo è il file che lanci con streamlit run app.py.
+
+Cosa fa:
+
+Imposta la pagina: Configura il titolo della scheda del browser e il layout (es. layout="wide").
+
+Inizializza lo stato: Si assicura che st.session_state.df esista (lo imposta a None se è il primo avvio).
+
+Chiama l'Importatore: Esegue sempre show_importer() (da modules/importer.py), che disegna i controlli di upload nella sidebar.
+
+Controlla se i dati esistono: Fa un if per vedere se st.session_state.df è stato caricato.
+
+Se i dati esistono: Chiama gli altri due assistenti:
+
+show_data_table() (da modules/data_viewer.py) per mostrare la tabella.
+
+show_plotting_ui() (da modules/plotting.py) per mostrare i controlli del grafico (nella sidebar) e il grafico stesso (nell'area principale).
+
+2. Gli Assistenti: cartella modules/
+
+modules/importer.py (L'Addetto all'Ingresso)
+
+Scopo: Caricare i dati.
+
+Come: Disegna i widget di upload (drag&drop, delimitatore, righe da saltare) nella st.sidebar.
+
+Azione Chiave: Se l'utente carica un file e preme "Carica", questo modulo usa Pandas per leggere il file e SALVA il risultato in st.session_state.df.
+
+modules/data_viewer.py (Il Tabellone)
+
+Scopo: Mostrare i dati grezzi.
+
+Come: LEGGE i dati da st.session_state.df.
+
+Azione Chiave: Se i dati esistono, disegna st.dataframe() dentro un st.expander (un pannello collassabile) nell'area principale.
+
+modules/plotting.py (Il Grafico)
+
+Scopo: Creare e mostrare i grafici.
+
+Come: LEGGE i dati da st.session_state.df.
+
+Azione Chiave:
+
+Disegna tutti i controlli per il grafico (tipo di grafico, mappatura assi X/Y/Z, colore, titolo, etichette, esportazione) nella st.sidebar.
+
+Usa Plotly Express (px) per generare la figura (fig).
+
+Disegna il grafico (st.plotly_chart(fig)) nell'area principale.
