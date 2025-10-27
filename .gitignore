@@ -11,3 +11,4 @@ __pycache__/
 # Database locale o file di log
 *.log
 *.sqlite
+.venv/
