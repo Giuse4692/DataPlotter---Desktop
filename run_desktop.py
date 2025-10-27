@@ -44,8 +44,14 @@ def start_streamlit_server():
         # Questo processo è "main thread", quindi i segnali funzionano
         bootstrap.load_config_options(flag_options=flag_options)
         
-        # Il terzo argomento (args) è una lista vuota [].
-        bootstrap.run(app_path, 'streamlit run', [], flag_options=flag_options)
+        # --- MODIFICA (v14) ---
+        # Abbiamo provato 'run' (-> TypeError str)
+        # Abbiamo provato None (-> TypeError NoneType)
+        # Abbiamo provato "" (-> TypeError str)
+        # L'errore è "...cannot be interpreted as an integer".
+        # Un Booleano (True/False) è un intero in Python. Proviamo True.
+        bootstrap.run(app_path, True, [], flag_options=flag_options)
+        # --- FINE MODIFICA ---
     except Exception as e:
         print(f"ERRORE SUBPROCESS STREAMLIT: {e}")
         with open("subprocess_error.log", "w") as f:
