@@ -1,80 +1,120 @@
 import webview
-import subprocess
-import threading
+import socket
 import time
 import sys
 import os
-import socket
-import atexit
-import requests  # Per verificare se Streamlit è pronto
+import threading
+import subprocess
+from streamlit.web import bootstrap
 
-# Se eseguibile PyInstaller, cambia la cartella corrente
-if getattr(sys, 'frozen', False):
-    os.chdir(sys._MEIPASS)
-
-# --- Configurazione ---
-APP_FILE = "app.py"
-APP_TITLE = "DataPlotter Desktop"
-APP_URL = "http://localhost:8501"
-SINGLE_INSTANCE_PORT = 12345
-STREAMLIT_PORT = 8501
-MAX_WAIT = 15  # Massimo tempo di attesa per Streamlit in secondi
-
-def check_single_instance():
-    """Controllo istanza unica tramite porta TCP."""
+def resource_path(relative_path):
+    """ Trova il percorso corretto, sia in sviluppo che in .exe """
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(('localhost', SINGLE_INSTANCE_PORT))
-        s.listen(1)
-        global app_lock_socket
-        app_lock_socket = s
-        atexit.register(lambda: s.close())  # Chiude il socket all'uscita
-        return True
-    except OSError:
-        return False
+        # PyInstaller crea una cartella temp e ci mette il path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Se non siamo in un .exe, usiamo il percorso normale
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
 
-def wait_streamlit_ready(url, timeout=MAX_WAIT):
-    """Aspetta che Streamlit sia pronto prima di aprire webview."""
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            requests.get(url)
-            return True
-        except:
-            time.sleep(0.5)
-    return False
-
-def run_streamlit():
-    """Avvia Streamlit in background."""
+def start_streamlit_server():
+    """
+    Questa funzione viene eseguita SOLO dal processo subprocess.
+    Avvia il server Streamlit e si blocca qui.
+    """
+    print("--- Processo 'SERVER' avviato. Avvio di Streamlit... ---")
+    app_path = resource_path('app.py')
+    
+    # Cambiamo directory per far sì che app.py trovi 'modules'
+    os.chdir(resource_path('.')) 
+    os.environ['STREAMLIT_SERVER_HEADLESS'] = 'true'
+    
+    # --- QUESTA È LA CORREZIONE (v10) ---
+    flag_options = {}
+    
+    # 1. Rispondiamo all'errore: disabilitiamo la modalità sviluppo.
+    flag_options['global.developmentMode'] = False
+    
+    # 2. Ora che la dev mode è 'False', possiamo impostare la porta.
+    flag_options['server.port'] = 8501
+    # --- FINE CORREZIONE ---
+    
     try:
-        subprocess.Popen([
-            sys.executable, "-m", "streamlit", "run", APP_FILE,
-            "--server.port", str(STREAMLIT_PORT),
-            "--server.headless", "true",
-            "--global.developmentMode", "false",
-            "--server.enableCORS", "false"
-        ], cwd=os.path.dirname(os.path.abspath(__file__)))
+        # Questo processo è "main thread", quindi i segnali funzionano
+        bootstrap.load_config_options(flag_options=flag_options)
+        
+        # Il terzo argomento (args) è una lista vuota [].
+        bootstrap.run(app_path, 'streamlit run', [], flag_options=flag_options)
     except Exception as e:
-        print(f"Errore avvio Streamlit: {e}")
+        print(f"ERRORE SUBPROCESS STREAMLIT: {e}")
+        with open("subprocess_error.log", "w") as f:
+            f.write(str(e))
 
-if __name__ == "__main__":
-    # 1. Controllo istanza singola
-    if not check_single_instance():
-        sys.exit(0)
+def start_main_app():
+    """
+    Questa funzione viene eseguita dall'utente (App Principale).
+    Lancia il subprocess e avvia Pywebview.
+    """
+    print("--- 'APP PRINCIPALE' avviata. ---")
 
-    # 2. Avvia Streamlit in thread separato
-    t = threading.Thread(target=run_streamlit)
-    t.daemon = True
-    t.start()
+    def run_streamlit_subprocess():
+        """ Funzione eseguita in un thread per non bloccare l'App Principale """
+        # Imposta la "bandiera" per dire al prossimo .exe di essere il server
+        env = os.environ.copy()
+        env["AM_I_STREAMLIT_SERVER"] = "true"
+        
+        # Nasconde la finestra della console per il processo server
+        startupinfo = None
+        if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            
+        try:
+            print(f"Avvio del processo server: {sys.executable}")
+            # Avvia l'exe stesso, che vedrà la "bandiera" ed eseguirà start_streamlit_server()
+            subprocess.Popen([sys.executable], env=env, startupinfo=startupinfo)
+            print("Processo server avviato.")
+        except Exception as e:
+            print(f"ERRORE AVVIO SUBPROCESS: {e}")
 
-    # 3. Aspetta che Streamlit sia pronto
-    if not wait_streamlit_ready(APP_URL):
-        print(f"Streamlit non ha risposto su {APP_URL} entro {MAX_WAIT} secondi")
+    def wait_for_server(port, timeout=40):
+        """ Attende che la porta 8501 sia attiva """
+        start_time = time.time()
+        print(f"In attesa del server Streamlit su http://localhost:{port}...")
+        while True:
+            try:
+                with socket.create_connection(("localhost", port), timeout=1):
+                    print("Server Streamlit è pronto!")
+                    break
+            except (OSError, ConnectionRefusedError):
+                if time.time() - start_time > timeout:
+                    print(f"Server non ha risposto entro {timeout} secondi.")
+                    return False
+                time.sleep(0.5)
+        return True
+
+    # 1. Avvia il thread che avvierà il processo server
+    streamlit_thread = threading.Thread(target=run_streamlit_subprocess, daemon=True)
+    streamlit_thread.start()
+
+    # 2. Aspetta il server e avvia Pywebview (nel main thread)
+    if wait_for_server(8501, timeout=40):
+        print("Avvio finestra PyWebview...")
+        webview.create_window('DataPlotter', 'http://localhost:8501')
+        webview.start(debug=True)
+    else:
+        print("Impossibile avviare. Server Streamlit non partito.")
+        input("Premi Invio per chiudere...")
         sys.exit(1)
 
-    # 4. Avvia la finestra desktop
-    try:
-        window = webview.create_window(APP_TITLE, APP_URL, width=1280, height=800)
-        webview.start()
-    except Exception as e:
-        print(f"Errore pywebview: {e}")
+# --- PUNTO DI INGRESSO GLOBALE ---
+if __name__ == '__main__':
+    # Questo controllo previene il loop infinito.
+    if os.environ.get("AM_I_STREAMLIT_SERVER") == "true":
+        # Se la "bandiera" è presente, esegui SOLO il server.
+        start_streamlit_server()
+    else:
+        # Altrimenti, esegui l'app GUI principale.
+        start_main_app()
