@@ -49,9 +49,9 @@ def start_streamlit_server():
         with open("subprocess_error.log", "w", encoding='utf-8') as f:
             f.write(str(e))
 
-# --- FIX DOWNLOAD (v25): Usiamo Tkinter al posto di window.save_dialog ---
+# --- FIX DOWNLOAD (v26): Accettiamo il nome file da JS ---
 
-def download_in_thread(download_url):
+def download_in_thread(download_url, suggested_filename): # <-- Nome file aggiunto
     """
     Funzione di download da eseguire in un thread.
     Chiede dove salvare (usando Tkinter) e scarica con requests.
@@ -60,7 +60,10 @@ def download_in_thread(download_url):
         print(f"Download in background (chiamato da JS) avviato: {download_url}")
         
         # 1. Chiede dove salvare (usando il dialogo nativo di Tkinter)
-        suggested_filename = download_url.split('/')[-1].split('?')[0] or "downloaded_file"
+        
+        # Non indoviniamo più il nome dall'URL, usiamo quello passato
+        if not suggested_filename:
+            suggested_filename = "downloaded_file"
         
         # Creiamo una finestra Tkinter "nascosta" per il dialogo
         root = tk.Tk()
@@ -69,7 +72,7 @@ def download_in_thread(download_url):
         
         filepath = asksaveasfilename(
             title="Salva file",
-            initialfile=suggested_filename,
+            initialfile=suggested_filename, # <-- ORA USA IL NOME CORRETTO
             # Aggiungiamo filtri per i file (opzionale ma carino)
             filetypes=[("File Immagine", "*.png *.jpg *.jpeg"), ("Tutti i file", "*.*")]
         )
@@ -93,12 +96,12 @@ def download_in_thread(download_url):
 class Api:
     """
     Classe esposta a JavaScript.
-    JS chiamerà pywebview.api.handle_download(url)
+    JS chiamerà pywebview.api.handle_download(url, filename)
     """
-    def handle_download(self, url):
-        print(f"API Python chiamata da JS: {url}")
+    def handle_download(self, url, filename): # <-- Nome file aggiunto
+        print(f"API Python chiamata da JS: {url}, Nome: {filename}")
         # Avvia il download "professionale" (con Tkinter) in un thread
-        threading.Thread(target=download_in_thread, args=(url,), daemon=True).start()
+        threading.Thread(target=download_in_thread, args=(url, filename), daemon=True).start()
 
 # Flag per assicurarci di iniettare lo script JS solo una volta
 js_injected = False
@@ -115,22 +118,27 @@ def on_page_loaded():
 
     # Iniettiamo lo script solo la prima volta che la pagina principale carica
     if not js_injected and current_url and "localhost:8501" in current_url:
-        print("Iniezione dello script 'Download Interceptor' (v25)...")
+        print("Iniezione dello script 'Download Interceptor' (v26)...")
         
+        # --- MODIFICA JS (v26) ---
         js_code = """
-            console.log('Interceptor (v25) in esecuzione. Ridefinizione di HTMLAnchorElement.prototype.click...');
+            console.log('Interceptor (v26) in esecuzione. Ridefinizione di HTMLAnchorElement.prototype.click...');
             
             const originalAnchorClick = HTMLAnchorElement.prototype.click;
 
             HTMLAnchorElement.prototype.click = function() {
-                console.log('Intercepted <a>.click(). Href:', this.href);
+                console.log('Intercepted <a>.click(). Href:', this.href, 'Download:', this.download);
                 
                 // Controlliamo se 'this.href' esiste e se è un link di download
                 if (this.href && this.href.includes('/media/')) {
                     // È un download di Streamlit!
                     console.log('Download Streamlit rilevato, passo a Python.');
-                    // Chiama la nostra API Python
-                    window.pywebview.api.handle_download(this.href);
+                    
+                    // Prendiamo anche l'attributo 'download' (il nome del file)
+                    const suggestedName = this.download || 'downloaded_file';
+                    
+                    // Chiama la nostra API Python con ENTRAMBI gli argomenti
+                    window.pywebview.api.handle_download(this.href, suggestedName);
                 } else {
                     // È un link normale (o un'ancora #), usa la funzione originale
                     originalAnchorClick.apply(this, arguments);
@@ -138,12 +146,13 @@ def on_page_loaded():
             };
             console.log('HTMLAnchorElement.prototype.click ridefinito.');
         """
+        # --- FINE MODIFICA JS ---
         
         window.evaluate_js(js_code)
         js_injected = True
         print("Script iniettato.")
 
-# --- Fine Sezione Download (v25) ---
+# --- Fine Sezione Download (v26) ---
 
 
 def start_main_app():
