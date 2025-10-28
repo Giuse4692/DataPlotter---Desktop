@@ -150,6 +150,7 @@ def show_plotting_ui(df):
     default_title = f"{', '.join(y_axes)} vs {x_axis}" if len(y_axes) > 1 and not is_3d else f"{y_axis_single} vs {x_axis}"
     
     plot_title = st.sidebar.text_input("Titolo Grafico", default_title)
+    st.markdown(f'<div id="graph-title-id" style="display:none;">{plot_title}</div>', unsafe_allow_html=True)
     x_label = st.sidebar.text_input("Etichetta Asse X", x_axis)
     y_label = st.sidebar.text_input("Etichetta Asse Y", ", ".join(y_axes) if len(y_axes) > 1 and not is_3d else y_axis_single)
     z_label = "Z"

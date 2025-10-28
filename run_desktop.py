@@ -7,7 +7,7 @@ import threading
 import subprocess
 import requests  # Per scaricare il file
 
-# --- FIX (v25): Importiamo tkinter per la finestra "Salva con nome" ---
+# --- FIX (v25/v31): Importiamo tkinter per la finestra "Salva con nome" ---
 import tkinter as tk
 from tkinter.filedialog import asksaveasfilename
 # --- FINE FIX ---
@@ -49,7 +49,7 @@ def start_streamlit_server():
         with open("subprocess_error.log", "w", encoding='utf-8') as f:
             f.write(str(e))
 
-# --- FIX DOWNLOAD (v26): Accettiamo il nome file da JS ---
+# --- FIX DOWNLOAD (v31): Accettiamo il nome file da JS ---
 
 def download_in_thread(download_url, suggested_filename): # <-- Nome file aggiunto
     """
@@ -59,22 +59,30 @@ def download_in_thread(download_url, suggested_filename): # <-- Nome file aggiun
     try:
         print(f"Download in background (chiamato da JS) avviato: {download_url}")
         
-        # 1. Chiede dove salvare (usando il dialogo nativo di Tkinter)
-        
-        # Non indoviniamo più il nome dall'URL, usiamo quello passato
+        # Pulizia base del nome file ricevuto da JS
         if not suggested_filename:
-            suggested_filename = "downloaded_file"
+            suggested_filename = "grafico_scaricato"
         
+        # Rimuove l'estensione se JS l'ha già aggiunta (per non averla doppia)
+        if suggested_filename.endswith(('.png', '.jpg', '.jpeg', '.svg', '.html')):
+             suggested_filename = os.path.splitext(suggested_filename)[0]
+
         # Creiamo una finestra Tkinter "nascosta" per il dialogo
         root = tk.Tk()
         root.withdraw() # Nasconde la finestra principale
         root.attributes("-topmost", True) # La mette in primo piano
         
         filepath = asksaveasfilename(
-            title="Salva file",
-            initialfile=suggested_filename, # <-- ORA USA IL NOME CORRETTO
-            # Aggiungiamo filtri per i file (opzionale ma carino)
-            filetypes=[("File Immagine", "*.png *.jpg *.jpeg"), ("Tutti i file", "*.*")]
+            title="Salva file con nome...",
+            initialfile=suggested_filename, # <-- ORA USA IL NOME CORRETTO (es. "Intensity_vs_Wavenumber")
+            defaultextension=".png", # Estensione di default
+            filetypes=[
+                ("Immagine PNG", "*.png"),
+                ("Immagine JPEG", "*.jpeg"),
+                ("Grafico Vettoriale SVG", "*.svg"),
+                ("File HTML", "*.html"),
+                ("Tutti i file", "*.*")
+            ]
         )
         
         root.destroy() # Chiude la finestra nascosta
@@ -118,11 +126,12 @@ def on_page_loaded():
 
     # Iniettiamo lo script solo la prima volta che la pagina principale carica
     if not js_injected and current_url and "localhost:8501" in current_url:
-        print("Iniezione dello script 'Download Interceptor' (v26)...")
+        print("Iniezione dello script 'Download Interceptor' (v31)...")
         
-        # --- MODIFICA JS (v26) ---
+        # --- MODIFICA JS (v31) ---
+        # Questo script JS ora legge l'ID 'graph-title-id' dalla pagina
         js_code = """
-            console.log('Interceptor (v26) in esecuzione. Ridefinizione di HTMLAnchorElement.prototype.click...');
+            console.log('Interceptor (v31) in esecuzione. Ridefinizione di HTMLAnchorElement.prototype.click...');
             
             const originalAnchorClick = HTMLAnchorElement.prototype.click;
 
@@ -134,10 +143,22 @@ def on_page_loaded():
                     // È un download di Streamlit!
                     console.log('Download Streamlit rilevato, passo a Python.');
                     
-                    // Prendiamo anche l'attributo 'download' (il nome del file)
-                    const suggestedName = this.download || 'downloaded_file';
+                    // --- LETTURA DEL TITOLO DINAMICO ---
+                    const titleElement = document.getElementById('graph-title-id');
+                    let suggestedName = this.download; // Nome di fallback (es. "Download_Grafico.png")
                     
-                    // Chiama la nostra API Python con ENTRAMBI gli argomenti
+                    if (titleElement && titleElement.textContent) {
+                        // Trovato l'ID! Usiamo il titolo vero.
+                        let rawTitle = titleElement.textContent.trim();
+                        // Pulizia del nome file (togliamo spazi e caratteri strani)
+                        suggestedName = rawTitle.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_');
+                        console.log('Titolo letto da ID #graph-title-id:', suggestedName);
+                    } else {
+                        console.warn('ID #graph-title-id non trovato. Uso il nome di fallback:', suggestedName);
+                    }
+                    // --- FINE LETTURA TITOLO ---
+                    
+                    // Chiama la nostra API Python con l'URL e il NOME PULITO
                     window.pywebview.api.handle_download(this.href, suggestedName);
                 } else {
                     // È un link normale (o un'ancora #), usa la funzione originale
@@ -152,7 +173,7 @@ def on_page_loaded():
         js_injected = True
         print("Script iniettato.")
 
-# --- Fine Sezione Download (v26) ---
+# --- Fine Sezione Download (v31) ---
 
 
 def start_main_app():
@@ -227,3 +248,4 @@ if __name__ == '__main__':
         start_streamlit_server()
     else:
         start_main_app()
+
