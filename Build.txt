@@ -1,0 +1,66 @@
+Hai ragione, il riepilogo precedente era superficiale e incompleto. Mi scuso.
+
+Ecco l'elenco completo di tutti i comandi che abbiamo usato nel terminale (CMD / VS Code) per configurare, pulire, costruire e testare l'applicazione.
+
+1. Configurazione Ambiente
+Questi comandi servono per attivare il tuo ambiente virtuale (.venv) e disattivare (base) di Anaconda, che creava conflitti.
+
+Bash
+
+# Per disattivare l'ambiente (base) di Anaconda
+conda deactivate
+
+# Per attivare il tuo ambiente virtuale corretto (da eseguire ogni volta)
+.\.venv\Scripts\activate
+2. Installazione Dipendenze
+Questo è il comando che abbiamo usato per assicurarci che tutte le librerie necessarie fossero installate dentro il .venv.
+
+Bash
+
+pip install streamlit pywebview pyinstaller tornado requests pandas plotly kaleido
+3. Pulizia (Da eseguire PRIMA di ogni Build)
+Questi comandi sono fondamentali per eliminare i file vecchi e i processi "fantasma" che bloccavano la porta 8501 e impedivano la cancellazione dei file.
+
+Bash
+
+# FORZA L'UCCISIONE di qualsiasi processo .exe vecchio (fondamentale)
+taskkill /F /IM DataPlotter_Debug.exe
+taskkill /F /IM DataPlotter.exe
+
+# CANCELLA le cartelle di build vecchie
+rmdir /s /q build
+rmdir /s /q dist
+4. Comandi di Build (I più importanti)
+Abbiamo usato due comandi principali: uno per il Debug (mostra la console nera) e uno Finale (nasconde la console).
+
+A. Comando di Build per DEBUG (con console):
+
+Bash
+
+pyinstaller --noconfirm --onedir --name=DataPlotter_Debug ^
+--add-data="app.py;." ^
+--add-data="modules;modules" ^
+--collect-all=streamlit ^
+--collect-all=tornado ^
+run_desktop.py
+B. Comando di Build FINALE (per distribuzione, senza console e con icona):
+
+Bash
+
+pyinstaller --noconfirm --onedir --windowed --name=DataPlotter ^
+--icon=dataplotter.ico ^
+--add-data="app.py;." ^
+--add-data="modules;modules" ^
+--collect-all=streamlit ^
+--collect-all=tornado ^
+run_desktop.py
+5. Esecuzione e Test
+Questi comandi servono per testare la versione di Debug.
+
+Bash
+
+# 1. Entra nella cartella di build
+cd dist\DataPlotter_Debug
+
+# 2. Esegui l'eseguibile di test
+.\DataPlotter_Debug.exe
