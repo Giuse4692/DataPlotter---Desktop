@@ -4,15 +4,19 @@ import numpy as np
 import pandas as pd 
 import re 
 
-# Dizionario dei simboli di Plotly (i più comuni)
+# *** INIZIO MODIFICA: DIZIONARIO CORRETTO ***
+# Questi simboli sono validi sia in 2D che in 3D
 PLOTLY_SYMBOLS = {
     "Cerchio": "circle",
     "Quadrato": "square",
     "Diamante": "diamond",
-    "Triangolo Su": "triangle-up",
-    "Stella": "star",
-    "Croce": "cross"
+    "Croce (+)": "cross",
+    "Croce (x)": "x",
+    "Cerchio Aperto": "circle-open",
+    "Quadrato Aperto": "square-open",
+    "Diamante Aperto": "diamond-open"
 }
+# *** FINE MODIFICA ***
 
 def parse_equation_advanced(eq_str):
     """
@@ -68,7 +72,7 @@ def show_annotation_controls(is_3d_mode):
     if 'custom_points' not in st.session_state:
         st.session_state.custom_points = []
     
-    # ⚠️ 1. LOGICA DI RESET STATO: Pulisce i punti se la modalità cambia
+    # 1. LOGICA DI RESET STATO
     current_mode = "3D" if is_3d_mode else "2D"
     if 'last_plot_mode' not in st.session_state:
         st.session_state.last_plot_mode = current_mode
@@ -76,8 +80,7 @@ def show_annotation_controls(is_3d_mode):
     if st.session_state.last_plot_mode != current_mode:
         st.session_state.custom_points = []
         st.session_state.last_plot_mode = current_mode
-        st.warning(f"Punti di annotazione resettati: cambiato da {st.session_state.last_plot_mode} a {current_mode}.")
-        st.rerun() # Forza l'aggiornamento
+        st.rerun()
         
     st.sidebar.header("5. Punti/Linee di Riferimento")
     
@@ -101,33 +104,67 @@ def show_annotation_controls(is_3d_mode):
                 if label not in points_to_remove:
                     points_to_keep.append(p)
             st.session_state.custom_points = points_to_keep
-            st.experimental_rerun()
+            st.rerun()
 
     # --- Sezione per l'aggiunta di un punto singolo ---
-    # Espandi se non ci sono punti, o se in 3D
     is_expanded = len(st.session_state.custom_points) == 0 or is_3d_mode 
     with st.sidebar.expander("Aggiungi Nuovo Punto", expanded=is_expanded):
-        point_x = st.number_input("Coordinata X", key="ann_point_x", value=0.0)
-        point_y = st.number_input("Coordinata Y", key="ann_point_y", value=0.0)
         
-        point_z = None
+        # *** INIZIO MODIFICA: LOGICA ON_CLICK ***
+        
+        # 1. Definisci la callback che gestisce TUTTA la logica
+        def _add_point_and_reset(is_3d_cb, symbol_key_cb):
+            # 1. Ottieni i valori dallo stato (dove i widget li hanno scritti)
+            point_x = st.session_state.ann_point_x
+            point_y = st.session_state.ann_point_y
+            point_z = st.session_state.ann_point_z if is_3d_cb else None
+            point_label = st.session_state.ann_point_label
+            
+            if not point_label: # Default se l'utente cancella l'etichetta
+                point_label = "Rif."
+
+            # 2. Logica di aggiunta
+            new_point = {
+                'x': point_x, 'y': point_y, 'z': point_z,
+                'label': point_label, 
+                'symbol': PLOTLY_SYMBOLS[symbol_key_cb]
+            }
+            st.session_state.custom_points.append(new_point)
+
+            # 3. Logica di reset (ora è sicura perché dentro una callback)
+            st.session_state.ann_point_x = 0.0
+            st.session_state.ann_point_y = 0.0
+            st.session_state.ann_point_z = 0.0
+            st.session_state.ann_point_label = "Rif."
+
+        # 2. Inizializza i valori nello stato SE non esistono
+        if 'ann_point_x' not in st.session_state:
+            st.session_state.ann_point_x = 0.0
+        if 'ann_point_y' not in st.session_state:
+            st.session_state.ann_point_y = 0.0
+        if 'ann_point_z' not in st.session_state:
+            st.session_state.ann_point_z = 0.0
+        if 'ann_point_label' not in st.session_state:
+            st.session_state.ann_point_label = "Rif."
+
+        # 3. Disegna i widget, legati ai 'key'
+        st.number_input("Coordinata X", key="ann_point_x")
+        st.number_input("Coordinata Y", key="ann_point_y")
+        
         if is_3d_mode:
-            point_z = st.number_input("Coordinata Z", key="ann_point_z", value=0.0) # ⚠️ INPUT Z CONDIZIONALE
+            st.number_input("Coordinata Z", key="ann_point_z") 
         
-        point_label = st.text_input("Etichetta", key="ann_point_label", value="Rif.")
-        point_symbol = st.selectbox("Simbolo", list(PLOTLY_SYMBOLS.keys()), key="ann_point_symbol")
+        st.text_input("Etichetta", key="ann_point_label")
+        point_symbol_key = st.selectbox("Simbolo", list(PLOTLY_SYMBOLS.keys()), key="ann_point_symbol")
         
-        if st.button("Aggiungi Punto", key="add_point_btn"):
-            if point_x is not None and point_y is not None:
-                new_point = {
-                    'x': point_x,
-                    'y': point_y,
-                    'z': point_z, 
-                    'label': point_label,
-                    'symbol': PLOTLY_SYMBOLS[point_symbol]
-                }
-                st.session_state.custom_points.append(new_point)
-                st.rerun()
+        # 4. Lega il bottone alla callback
+        st.button(
+            "Aggiungi Punto", 
+            key="add_point_btn", 
+            on_click=_add_point_and_reset, 
+            args=(is_3d_mode, point_symbol_key) # Passa i valori necessari
+        )
+        # *** FINE MODIFICA ***
 
 
     # Linea di Riferimento
@@ -164,6 +201,7 @@ def get_annotations_trace(custom_points, is_3d=False):
             mode='markers+text',
             text=points_text,
             name='Annotazioni',
+            textposition="top center", # Aggiunto per coerenza
             marker=dict(
                 size=12, 
                 color='red', 
@@ -200,7 +238,13 @@ def add_reference_line(fig, var, val, slope=None, df=None):
         m = slope 
         try:
             # Assumiamo che x_axis sia accessibile da st.session_state
-            x_col = st.session_state.get('x_axis', df.columns[0])
+            # NOTA: questo 'x_axis' è quello del grafico principale, non l'input dell'annotazione
+            x_col_key = 'x_axis_2d' # Chiave del widget 2D
+            if st.session_state.get('plot_type', "2D") in ["Scatter 3D", "Linea 3D (Line)", "Superficie 3D (Mesh)"]:
+                 x_col_key = 'x_3d_0' # Chiave del primo widget 3D
+            
+            x_col = st.session_state.get(x_col_key, df.columns[0])
+            
             x_min = df[x_col].min()
             x_max = df[x_col].max()
             x_line = np.linspace(x_min, x_max, 100)
