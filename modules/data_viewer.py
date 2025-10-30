@@ -4,10 +4,7 @@ import numpy as np
 import re 
 # from pandas.core.computation.ops import UndefinedVariableError # Rimossa
 
-@st.cache_data
-def convert_df_to_csv(df_to_convert):
-    """Funzione helper per convertire il DataFrame in CSV per il download."""
-    return df_to_convert.to_csv(index=False).encode('utf-8')
+# Funzione convert_df_to_csv rimossa
 
 def show_data_processor():
     """
@@ -224,24 +221,10 @@ def show_data_processor():
     except Exception as e:
         st.error(f"Errore durante il filtraggio: {e}")
 
-    st.markdown("---")
-
     # --- 5. Esportazione CSV ---
-    st.subheader("Esporta Dati Processati")
+    # SEZIONE RIMOSSA COME RICHIESTO
     
-    csv_data = convert_df_to_csv(st.session_state.processed_df)
-    
-    # *** INIZIO MODIFICA: CHIAVE DINAMICA ***
-    # Questa è la versione che ti avevo mandato prima.
-    # La chiave cambia ogni volta che i dati cambiano.
-    st.download_button(
-        label="Scarica dati processati (CSV)",
-        data=csv_data,
-        file_name="dati_processati.csv",
-        mime="text/csv",
-        key=f"download_csv_data_{len(st.session_state.processed_df)}" 
-    )
-    # *** FINE MODIFICA ***
+    st.markdown("---") # Mantengo il separatore
 
     # --- 6. Visualizzazione Tabella ---
     with st.expander("Visualizzazione Dati (Tabella)", expanded=True):
