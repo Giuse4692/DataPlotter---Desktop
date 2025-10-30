@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np 
 import re 
-# La riga 'from pandas.core.computation.ops import UndefinedVariableError' 
-# è stata rimossa per correggere l'ImportError.
+# from pandas.core.computation.ops import UndefinedVariableError # Rimossa
 
 @st.cache_data
 def convert_df_to_csv(df_to_convert):
@@ -118,9 +117,7 @@ def show_data_processor():
         - **Costanti:** `pi`, `e`
         """)
 
-    # *** INIZIO MODIFICA: UI Unificata e Logica Callback ***
-
-    # 1. Definisci la callback per gestire il calcolo e il reset
+    # Definisci la callback per gestire il calcolo e il reset
     def _calculate_and_reset():
         formula_str = st.session_state.formula_input_unified # Leggi dallo stato
         if not formula_str or '=' not in formula_str:
@@ -144,7 +141,6 @@ def show_data_processor():
             
             df = st.session_state.processed_df
             
-            # *** INIZIO CORREZIONE: Gestione Errori Generica ***
             df.eval(f"`{safe_col_name}` = {formula_expression}", inplace=True, engine='python')
             st.session_state.processed_df = df
             st.session_state.formula_input_unified = "" # Reset sicuro dello stato
@@ -157,19 +153,18 @@ def show_data_processor():
                 st.error(f"Errore: Nome colonna non trovato: {e}. Controlla maiuscole/minuscole. Se il nome ha spazi, usa `` `Nome Colonna` ``.")
             else:
                 st.error(f"Errore nella formula: {e}")
-        # *** FINE CORREZIONE ***
 
-    # 2. Inizializza lo stato per il campo di testo unificato
+    # Inizializza lo stato per il campo di testo unificato
     if 'formula_input_unified' not in st.session_state:
         st.session_state.formula_input_unified = ""
         
-    # 3. Disegna il widget (sostituisce i due vecchi text_input)
+    # Disegna il widget
     formula_str_input = st.text_input(
         "Formula (es. `Nuova_Col = Colonna_A * 2` o `` `Col C` = `Col A` + `Col B` ``)", 
         key="formula_input_unified"
     )
 
-    # 4. Logica per i Suggerimenti ("Autocompilamento")
+    # Logica per i Suggerimenti ("Autocompilamento")
     suggestions = []
     if formula_str_input and '=' in formula_str_input:
         try:
@@ -186,13 +181,12 @@ def show_data_processor():
     if suggestions:
         st.info(f"Suggerimenti: `{'`, `'.join(suggestions)}`")
 
-    # 5. Lega il bottone alla callback
+    # Lega il bottone alla callback
     st.button(
         "Calcola e Aggiungi", 
         key="calc_btn",
         on_click=_calculate_and_reset
     )
-    # *** FINE MODIFICA ***
     
     st.markdown("---")
 
@@ -237,12 +231,17 @@ def show_data_processor():
     
     csv_data = convert_df_to_csv(st.session_state.processed_df)
     
+    # *** INIZIO MODIFICA: CHIAVE DINAMICA ***
+    # Questa è la versione che ti avevo mandato prima.
+    # La chiave cambia ogni volta che i dati cambiano.
     st.download_button(
         label="Scarica dati processati (CSV)",
         data=csv_data,
         file_name="dati_processati.csv",
         mime="text/csv",
+        key=f"download_csv_data_{len(st.session_state.processed_df)}" 
     )
+    # *** FINE MODIFICA ***
 
     # --- 6. Visualizzazione Tabella ---
     with st.expander("Visualizzazione Dati (Tabella)", expanded=True):
